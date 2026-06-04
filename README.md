@@ -1,5 +1,6 @@
 # 📉 Real-Time Anomaly Detection API
 
+[![Live demo](https://img.shields.io/badge/live%20demo-online-brightgreen)](https://anomaly-detection-maml.onrender.com/)
 [![CI](https://github.com/areeba-khizer/anomaly-detection/actions/workflows/ci.yml/badge.svg)](https://github.com/areeba-khizer/anomaly-detection/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688)
@@ -12,6 +13,15 @@ signal and flags anomalies as they happen.
 
 Built to mirror the kind of monitoring used for payment transactions, IoT
 sensor telemetry, and logistics metrics.
+
+### 🚀 Live demo
+
+- **Dashboard:** https://anomaly-detection-maml.onrender.com/
+- **Real NYC taxi replay:** https://anomaly-detection-maml.onrender.com/?mode=taxi
+- **API docs:** https://anomaly-detection-maml.onrender.com/docs
+
+> Hosted on Render's free tier, so the instance sleeps when idle — the first
+> request after a quiet period can take ~30–50s to wake up, then it's fast.
 
 ![Dashboard](docs/dashboard.png)
 
