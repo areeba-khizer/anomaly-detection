@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from app.dataset import in_known_anomaly, load_nyc_taxi
 from app.detector import AnomalyDetector
 from app.main import app
 from app.simulator import StreamConfig, TimeSeriesSimulator
@@ -74,6 +75,23 @@ def test_score_endpoint_returns_valid_payload():
             "step", "value", "anomaly_score", "is_anomaly", "threshold",
         }
         assert 0.0 <= body["anomaly_score"] <= 1.0
+
+
+def test_nyc_taxi_dataset_loads():
+    from datetime import datetime
+
+    data = load_nyc_taxi()
+    assert len(data) == 10320
+    assert data[0].timestamp == datetime(2014, 7, 1, 0, 0)
+    assert all(o.value > 0 for o in data)
+
+
+def test_known_anomaly_window_lookup():
+    from datetime import datetime
+
+    # A point inside the Christmas window is labelled; July is not.
+    assert in_known_anomaly(datetime(2014, 12, 25, 12, 0)) == "Christmas"
+    assert in_known_anomaly(datetime(2014, 7, 15, 12, 0)) is None
 
 
 def test_stream_next_and_history():

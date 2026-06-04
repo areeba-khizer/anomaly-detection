@@ -62,9 +62,12 @@ sensor telemetry, and logistics metrics.
 | [app/main.py](app/main.py) | FastAPI app, endpoints and dashboard route |
 | [app/static/dashboard.html](app/static/dashboard.html) | Live dashboard |
 | [train.py](train.py) | Fit + persist the model, print eval metrics |
-| [scripts/stream_demo.py](scripts/stream_demo.py) | Feed a stream into the API |
+| [scripts/stream_demo.py](scripts/stream_demo.py) | Feed a simulated stream into the API |
+| [app/dataset.py](app/dataset.py) | Loader + labels for the real NAB NYC taxi dataset |
+| [scripts/replay_dataset.py](scripts/replay_dataset.py) | Replay real data and evaluate vs known anomalies |
 | [tests/test_api.py](tests/test_api.py) | Test suite |
 | [Dockerfile](Dockerfile) · [docker-compose.yml](docker-compose.yml) | Containerised deployment |
+| [render.yaml](render.yaml) | One-click deploy to Render |
 | [.github/workflows/ci.yml](.github/workflows/ci.yml) | CI: tests + Docker build |
 
 ---
@@ -103,6 +106,19 @@ docker compose up --build      # then open http://127.0.0.1:8000
 docker build -t anomaly-detection .
 docker run -p 8000:8000 anomaly-detection
 ```
+
+### Deploy to Render
+
+This repo includes a [render.yaml](render.yaml) blueprint, so it deploys to
+[Render](https://render.com) with no extra configuration:
+
+1. Push the repo to GitHub (already done).
+2. On Render: **New → Blueprint**, then connect this repository.
+3. Render reads `render.yaml`, builds the Docker image, and deploys the
+   service with a healthcheck on `/health`. The free tier is sufficient.
+
+Once live, the dashboard is at your service URL (e.g.
+`https://anomaly-detection.onrender.com`) and the API docs at `/docs`.
 
 ---
 
@@ -163,6 +179,41 @@ your own trade-off.
 
 ---
 
+## Validation on real data (NAB)
+
+The simulator is convenient for the live demo, but the detector is also
+validated against **real, human-labelled anomalies** from the
+[Numenta Anomaly Benchmark](https://github.com/numenta/NAB). The bundled
+[`data/nyc_taxi.csv`](data/nyc_taxi.csv) is NYC taxi demand in 30-minute
+buckets (Jul 2014 – Jan 2015, 10,320 points) with five known anomalies caused
+by real events.
+
+```bash
+python scripts/replay_dataset.py            # score in-process
+python scripts/replay_dataset.py --api http://127.0.0.1:8000   # via the API
+```
+
+Replaying the series through the detector:
+
+```
+Known anomalies (NAB ground truth):
+  [DETECTED] NYC Marathon         2014-10-30 – 2014-11-03
+  [  MISSED] Thanksgiving         2014-11-25 – 2014-11-29
+  [DETECTED] Christmas            2014-12-23 – 2014-12-27
+  [DETECTED] New Year's           2014-12-29 – 2015-01-03
+  [DETECTED] Jan 2015 snowstorm   2015-01-24 – 2015-01-29
+
+Detected 4/5 known anomalies.
+Total points flagged: 87 (0.8% of stream); 4 outside known windows.
+```
+
+It catches **4 of the 5** known events with a 0.8% overall flag rate. The
+missed one (Thanksgiving) has a milder dip than the sharp Christmas/New
+Year/snowstorm drops — a fair illustration of where an unsupervised,
+univariate Isolation Forest trades recall for a very low false-positive rate.
+
+---
+
 ## Production considerations
 
 Notes on what it would take to run this for real — the trade-offs a streaming
@@ -205,4 +256,14 @@ and smoke-tests the Docker image on every push — see
 ## Tech stack
 
 `Python` · `FastAPI` · `scikit-learn` · `Isolation Forest` · `NumPy` ·
-`Chart.js` · `Uvicorn` · `pytest`
+`Chart.js` · `Uvicorn` · `Docker` · `GitHub Actions` · `pytest` · `NAB`
+
+---
+
+## Data
+
+- **Live demo:** synthetic stream from [app/simulator.py](app/simulator.py).
+- **Validation:** real NYC taxi demand from the
+  [Numenta Anomaly Benchmark](https://github.com/numenta/NAB)
+  (`data/nyc_taxi.csv`), © Numenta Inc., included under NAB's MIT license for
+  benchmarking.

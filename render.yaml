@@ -1,0 +1,11 @@
+# Render Blueprint — deploy the API + dashboard from this repo.
+# On render.com: New > Blueprint, connect this repository, and Render reads
+# this file to build and run the service. Free tier works out of the box.
+services:
+  - type: web
+    name: anomaly-detection
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
