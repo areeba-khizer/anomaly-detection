@@ -1,5 +1,10 @@
 # 📉 Real-Time Anomaly Detection API
 
+[![CI](https://github.com/areeba-khizer/anomaly-detection/actions/workflows/ci.yml/badge.svg)](https://github.com/areeba-khizer/anomaly-detection/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688)
+![License](https://img.shields.io/badge/license-MIT-green)
+
 A production-style service that scores streaming time-series data points for
 anomalies in real time using an **Isolation Forest**, served behind a
 **FastAPI** endpoint, with a built-in **live dashboard** that visualises the
@@ -7,6 +12,12 @@ signal and flags anomalies as they happen.
 
 Built to mirror the kind of monitoring used for payment transactions, IoT
 sensor telemetry, and logistics metrics.
+
+![Dashboard](docs/dashboard.png)
+
+> The dashboard streams simulated telemetry, scores every point with the
+> Isolation Forest, and marks flagged anomalies (red) on the live signal — note
+> the dropout near step 113 driving the anomaly score above the threshold.
 
 ---
 
@@ -53,6 +64,8 @@ sensor telemetry, and logistics metrics.
 | [train.py](train.py) | Fit + persist the model, print eval metrics |
 | [scripts/stream_demo.py](scripts/stream_demo.py) | Feed a stream into the API |
 | [tests/test_api.py](tests/test_api.py) | Test suite |
+| [Dockerfile](Dockerfile) · [docker-compose.yml](docker-compose.yml) | Containerised deployment |
+| [.github/workflows/ci.yml](.github/workflows/ci.yml) | CI: tests + Docker build |
 
 ---
 
@@ -77,6 +90,19 @@ uvicorn app.main:app --reload
 
 If no `model.joblib` is present, the API fits a model on baseline data at
 startup, so it always boots ready to score.
+
+### Run with Docker
+
+The image trains the model at build time, so the container boots ready to
+score and ships with a healthcheck.
+
+```bash
+docker compose up --build      # then open http://127.0.0.1:8000
+
+# or with plain Docker
+docker build -t anomaly-detection .
+docker run -p 8000:8000 anomaly-detection
+```
 
 ---
 
@@ -137,11 +163,42 @@ your own trade-off.
 
 ---
 
+## Production considerations
+
+Notes on what it would take to run this for real — the trade-offs a streaming
+detector has to make:
+
+- **Concept drift.** A model fit on last month's baseline goes stale as traffic
+  patterns shift (seasonal sales, new sensors). In production I'd schedule
+  periodic retraining on a rolling window of recent *normal* data and track the
+  flagged-anomaly rate as a drift signal.
+- **State & scaling.** The detector currently keeps its rolling window in
+  process memory, so horizontal scaling needs either sticky routing per stream
+  or an external store (e.g. Redis) for the window — otherwise replicas score
+  with inconsistent context.
+- **Latency.** Scoring is a single Isolation Forest pass over a 5-feature
+  vector — sub-millisecond — so throughput is bound by the web layer, not the
+  model. The `/score` path does no blocking I/O.
+- **Threshold tuning.** The decision threshold is auto-calibrated from the
+  baseline score distribution; the right operating point depends on the cost of
+  false positives vs. missed anomalies, which is a business decision, not a
+  purely technical one.
+- **Cold start & persistence.** The model is trained at build time and loaded
+  on startup, so there's no first-request penalty; `model.joblib` is a
+  versioned artifact you could promote through environments.
+- **Observability.** Next steps would be structured request logging, a
+  `/metrics` endpoint (Prometheus) for score distribution and flag rate, and
+  alerting when the anomaly rate spikes.
+
 ## Testing
 
 ```bash
 pytest -q
 ```
+
+Continuous integration runs the test suite on Python 3.11 and 3.12 and builds
+and smoke-tests the Docker image on every push — see
+[.github/workflows/ci.yml](.github/workflows/ci.yml).
 
 ---
 

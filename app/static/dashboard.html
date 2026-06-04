@@ -190,6 +190,19 @@
       else clearInterval(timer);
     }
 
+    async function loadHistory() {
+      // Render any points already scored by the server (survives refreshes).
+      try {
+        const res = await fetch("/history");
+        const { points } = await res.json();
+        for (const p of points) {
+          if (p.is_anomaly) { anomalyCount++; addAnomalyRow(p); }
+          pushChart(p);
+        }
+        if (points.length) updateCards(points[points.length - 1]);
+      } catch (e) { console.error(e); }
+    }
+
     document.getElementById("toggleBtn").onclick = () => setRunning(!running);
     document.getElementById("resetBtn").onclick = async () => {
       await fetch("/reset", { method: "POST" });
@@ -204,6 +217,8 @@
       document.getElementById("cAnoms").textContent = "0";
       document.getElementById("cScore").textContent = "—";
     };
+
+    loadHistory();
   </script>
 </body>
 </html>

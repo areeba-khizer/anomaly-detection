@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest -q
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t anomaly-detection:ci .
+
+      - name: Smoke-test the container
+        run: |
+          docker run -d --name anomaly -p 8000:8000 anomaly-detection:ci
+          for i in $(seq 1 20); do
+            if curl -sf http://127.0.0.1:8000/health > /dev/null; then
+              echo "API is healthy"; break
+            fi
+            sleep 2
+          done
+          curl -sf http://127.0.0.1:8000/health
+          curl -sf -X POST http://127.0.0.1:8000/score \
+            -H 'Content-Type: application/json' -d '{"value": 100}'
+          docker rm -f anomaly
