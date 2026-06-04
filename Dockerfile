@@ -12,8 +12,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the application code.
+# Copy the application code and the bundled dataset.
 COPY app ./app
+COPY data ./data
 COPY train.py .
 
 # Train the model at build time so the image boots ready to score.

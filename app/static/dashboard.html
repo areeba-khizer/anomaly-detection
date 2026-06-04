@@ -240,8 +240,17 @@
       clearCharts();
       document.getElementById("anomTable").innerHTML =
         "<tr><td colspan='4'>Loading real dataset…</td></tr>";
-      const res = await fetch("/dataset/replay");
-      const d = await res.json();
+      let d;
+      try {
+        const res = await fetch("/dataset/replay");
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        d = await res.json();
+      } catch (e) {
+        document.getElementById("anomTable").innerHTML =
+          `<tr><td colspan='4'>Failed to load dataset: ${e.message}. ` +
+          `Check the server logs.</td></tr>`;
+        return;
+      }
 
       const vc = valueChart.data, sc = scoreChart.data;
       for (const p of d.points) {
