@@ -32,6 +32,13 @@
     button.secondary { background: var(--panel); color: var(--text);
       border: 1px solid var(--border); }
     button:hover { opacity: 0.9; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    select { background: var(--panel); color: var(--text);
+      border: 1px solid var(--border); padding: 7px 10px; border-radius: 6px;
+      font-weight: 600; cursor: pointer; }
+    .badge.known { background: rgba(210,153,34,0.15); color: #d29922; }
+    .badge.ok-badge { background: rgba(63,185,80,0.15); color: var(--ok); }
+    .note { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
     main { padding: 24px 28px; max-width: 1200px; margin: 0 auto; }
     .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;
       margin-bottom: 24px; }
@@ -60,6 +67,10 @@
   <header>
     <h1>📉 Real-Time <span>Anomaly Detection</span></h1>
     <div class="controls">
+      <select id="modeSelect" title="Data source">
+        <option value="sim">Simulated stream</option>
+        <option value="taxi">NYC taxi (real data)</option>
+      </select>
       <span><span class="dot off" id="statusDot"></span>
         <span id="statusText">paused</span></span>
       <button id="toggleBtn">Start stream</button>
@@ -68,14 +79,16 @@
   </header>
 
   <main>
+    <p class="note" id="sourceNote">Streaming synthetic telemetry — click
+      <b>Start stream</b>, or switch the source to replay real NYC taxi data.</p>
     <div class="cards">
-      <div class="card"><div class="label">Points seen</div>
+      <div class="card"><div class="label" id="lPoints">Points seen</div>
         <div class="value" id="cPoints">0</div></div>
-      <div class="card"><div class="label">Anomalies flagged</div>
+      <div class="card"><div class="label" id="lAnoms">Anomalies flagged</div>
         <div class="value danger" id="cAnoms">0</div></div>
-      <div class="card"><div class="label">Latest score</div>
+      <div class="card"><div class="label" id="lScore">Latest score</div>
         <div class="value" id="cScore">—</div></div>
-      <div class="card"><div class="label">Threshold</div>
+      <div class="card"><div class="label" id="lThresh">Threshold</div>
         <div class="value" id="cThresh">—</div></div>
     </div>
 
@@ -83,9 +96,9 @@
     <div class="chart-wrap"><canvas id="scoreChart" height="70"></canvas></div>
 
     <div class="chart-wrap">
-      <h3 style="margin-top:0">Recent flagged anomalies</h3>
+      <h3 style="margin-top:0" id="tableTitle">Recent flagged anomalies</h3>
       <table>
-        <thead><tr><th>Step</th><th>Value</th><th>Score</th>
+        <thead><tr id="thHead"><th>Step</th><th>Value</th><th>Score</th>
           <th>Status</th></tr></thead>
         <tbody id="anomTable"></tbody>
       </table>
@@ -102,9 +115,12 @@
         { label: "Value", data: [], borderColor: "#58a6ff",
           backgroundColor: "rgba(88,166,255,0.1)", borderWidth: 2,
           pointRadius: 0, tension: 0.25, fill: true },
-        { label: "Anomalies", data: [], borderColor: "#f85149",
+        { label: "Detected", data: [], borderColor: "#f85149",
           backgroundColor: "#f85149", showLine: false, pointRadius: 5,
           pointStyle: "rectRot" },
+        { label: "Known anomaly", data: [], borderColor: "#d29922",
+          backgroundColor: "rgba(210,153,34,0.6)", showLine: false,
+          pointRadius: 2 },
       ]},
       options: { animation: false, responsive: true,
         scales: { x: { ticks: { color: "#8b949e", maxTicksLimit: 8 },
@@ -138,14 +154,22 @@
       vc.labels.push(p.step);
       vc.datasets[0].data.push(p.value);
       vc.datasets[1].data.push(p.is_anomaly ? p.value : null);
+      vc.datasets[2].data.push(null);
       sc.labels.push(p.step);
       sc.datasets[0].data.push(p.anomaly_score);
       sc.datasets[1].data.push(p.threshold);
-      [vc.datasets[0], vc.datasets[1], sc.datasets[0], sc.datasets[1]]
+      [...vc.datasets, ...sc.datasets]
         .forEach(d => { while (d.data.length > MAX) d.data.shift(); });
       while (vc.labels.length > MAX) vc.labels.shift();
       while (sc.labels.length > MAX) sc.labels.shift();
       valueChart.update(); scoreChart.update();
+    }
+
+    function clearCharts() {
+      [valueChart, scoreChart].forEach(c => {
+        c.data.labels = [];
+        c.data.datasets.forEach(d => d.data = []);
+      });
     }
 
     function updateCards(p) {
@@ -203,22 +227,116 @@
       } catch (e) { console.error(e); }
     }
 
-    document.getElementById("toggleBtn").onclick = () => setRunning(!running);
-    document.getElementById("resetBtn").onclick = async () => {
-      await fetch("/reset", { method: "POST" });
+    // -- NYC taxi (real data) mode ------------------------------------------
+    function setLabels(points, anoms, score, thresh) {
+      document.getElementById("lPoints").textContent = points;
+      document.getElementById("lAnoms").textContent = anoms;
+      document.getElementById("lScore").textContent = score;
+      document.getElementById("lThresh").textContent = thresh;
+    }
+
+    async function loadDataset() {
+      setRunning(false);
+      clearCharts();
+      document.getElementById("anomTable").innerHTML =
+        "<tr><td colspan='4'>Loading real dataset…</td></tr>";
+      const res = await fetch("/dataset/replay");
+      const d = await res.json();
+
+      const vc = valueChart.data, sc = scoreChart.data;
+      for (const p of d.points) {
+        const label = p.datetime.slice(0, 10);
+        vc.labels.push(label);
+        vc.datasets[0].data.push(p.value);
+        vc.datasets[1].data.push(p.is_anomaly ? p.value : null);
+        vc.datasets[2].data.push(p.known_anomaly ? p.value : null);
+        sc.labels.push(label);
+        sc.datasets[0].data.push(p.anomaly_score);
+        sc.datasets[1].data.push(p.threshold);
+      }
+      valueChart.update(); scoreChart.update();
+
+      const s = d.summary;
+      setLabels("Total points", "Anomalies flagged",
+                "Known detected", "Threshold");
+      document.getElementById("cPoints").textContent = s.total_points;
+      document.getElementById("cAnoms").textContent = s.flagged;
+      const cScore = document.getElementById("cScore");
+      cScore.textContent = `${s.known_detected}/${s.known_total}`;
+      cScore.className = "value ok";
+      document.getElementById("cThresh").textContent =
+        d.points[0].threshold.toFixed(2);
+
+      // Table: the five known, human-labelled events and whether we caught them.
+      const tbody = document.getElementById("anomTable");
+      tbody.innerHTML = "";
+      for (const e of d.events) {
+        const tr = document.createElement("tr");
+        const badge = e.detected
+          ? '<span class="badge anom">DETECTED</span>'
+          : '<span class="badge known">MISSED</span>';
+        tr.innerHTML = `<td>${e.label}</td>
+          <td>${e.start.slice(0, 10)}</td><td>${e.end.slice(0, 10)}</td>
+          <td>${badge}</td>`;
+        tbody.appendChild(tr);
+      }
+      document.getElementById("tableTitle").textContent =
+        "Known anomalies (NAB ground truth)";
+      document.getElementById("thHead").innerHTML =
+        "<th>Event</th><th>From</th><th>To</th><th>Result</th>";
+      document.getElementById("sourceNote").innerHTML =
+        `Real data: <b>${d.source}</b>. Red = detected anomaly, ` +
+        `orange = known-anomaly window.`;
+    }
+
+    function setSimMode() {
+      clearCharts(); valueChart.update(); scoreChart.update();
       anomalyCount = 0;
-      [valueChart, scoreChart].forEach(c => {
-        c.data.labels = [];
-        c.data.datasets.forEach(d => d.data = []);
-        c.update();
-      });
       document.getElementById("anomTable").innerHTML = "";
+      setLabels("Points seen", "Anomalies flagged", "Latest score",
+                "Threshold");
       document.getElementById("cPoints").textContent = "0";
       document.getElementById("cAnoms").textContent = "0";
       document.getElementById("cScore").textContent = "—";
+      document.getElementById("cThresh").textContent = "—";
+      document.getElementById("tableTitle").textContent =
+        "Recent flagged anomalies";
+      document.getElementById("thHead").innerHTML =
+        "<th>Step</th><th>Value</th><th>Score</th><th>Status</th>";
+      document.getElementById("sourceNote").innerHTML =
+        "Streaming synthetic telemetry — click <b>Start stream</b>, or " +
+        "switch the source to replay real NYC taxi data.";
+      loadHistory();
+    }
+
+    // -- controls -----------------------------------------------------------
+    function applyMode(mode) {
+      const live = mode === "sim";
+      document.getElementById("toggleBtn").disabled = !live;
+      document.getElementById("resetBtn").disabled = !live;
+      document.getElementById("statusDot").style.display = live ? "" : "none";
+      document.getElementById("statusText").style.display = live ? "" : "none";
+      if (live) setSimMode(); else loadDataset();
+    }
+
+    document.getElementById("modeSelect").onchange = (e) =>
+      applyMode(e.target.value);
+    document.getElementById("toggleBtn").onclick = () => setRunning(!running);
+    document.getElementById("resetBtn").onclick = async () => {
+      await fetch("/reset", { method: "POST" });
+      setSimMode();
     };
 
-    loadHistory();
+    // Allow deep-linking a mode, e.g. /?mode=taxi
+    const startMode =
+      new URLSearchParams(location.search).get("mode") === "taxi"
+        ? "taxi" : "sim";
+    if (startMode === "taxi") {
+      document.getElementById("modeSelect").value = "taxi";
+      applyMode("taxi");
+    } else {
+      loadHistory();
+    }
   </script>
 </body>
 </html>

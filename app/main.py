@@ -16,6 +16,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 
+from .dataset import anomaly_windows, in_known_anomaly, load_nyc_taxi
 from .detector import AnomalyDetector
 from .schemas import DataPoint, HealthResponse, ScoreResponse
 from .simulator import StreamConfig, TimeSeriesSimulator
@@ -25,12 +26,17 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 BASELINE_POINTS = 600
 HISTORY_SIZE = 300
 
+# Detector settings tuned for the real NYC taxi series (≈1-day window).
+DATASET_WINDOW = 48
+DATASET_QUANTILE = 0.99
+
 # Shared application state.
 state: dict = {
     "detector": None,
     "simulator": None,
     "history": deque(maxlen=HISTORY_SIZE),
     "step": 0,
+    "dataset_replay": None,  # cached scored real-data payload
 }
 
 
@@ -125,6 +131,68 @@ def reset() -> dict:
     state["step"] = 0
     state["simulator"] = TimeSeriesSimulator(StreamConfig(seed=None))
     return {"status": "reset"}
+
+
+def _build_dataset_replay() -> dict:
+    """Score the full real NYC taxi series and summarise vs known anomalies."""
+    observations = load_nyc_taxi()
+    values = [o.value for o in observations]
+    detector = AnomalyDetector(
+        window=DATASET_WINDOW, calibration_quantile=DATASET_QUANTILE
+    ).fit(values)
+    scored = detector.score_series(values)
+
+    points = []
+    for i, (obs, res) in enumerate(zip(observations, scored)):
+        label = in_known_anomaly(obs.timestamp)
+        points.append({
+            "step": i,
+            "datetime": obs.timestamp.isoformat(sep=" "),
+            "value": res.value,
+            "anomaly_score": res.anomaly_score,
+            "is_anomaly": res.is_anomaly,
+            "threshold": round(res.threshold, 4),
+            "known_anomaly": label,
+        })
+
+    flagged_steps = {p["step"] for p in points if p["is_anomaly"]}
+    events = []
+    for start, end, label in anomaly_windows():
+        detected = any(
+            p["is_anomaly"]
+            and start <= obs.timestamp <= end
+            for p, obs in zip(points, observations)
+        )
+        events.append({
+            "label": label,
+            "start": start.isoformat(sep=" "),
+            "end": end.isoformat(sep=" "),
+            "detected": detected,
+        })
+
+    return {
+        "source": "NAB NYC taxi demand (30-min buckets, Jul 2014 – Jan 2015)",
+        "points": points,
+        "events": events,
+        "summary": {
+            "total_points": len(points),
+            "flagged": len(flagged_steps),
+            "known_total": len(events),
+            "known_detected": sum(e["detected"] for e in events),
+        },
+    }
+
+
+@app.get("/dataset/replay")
+def dataset_replay() -> dict:
+    """Return the real NYC taxi series scored by the detector (cached).
+
+    Powers the dashboard's "NYC taxi" mode: the whole 7-month series with
+    flagged anomalies and the five known, human-labelled events.
+    """
+    if state["dataset_replay"] is None:
+        state["dataset_replay"] = _build_dataset_replay()
+    return state["dataset_replay"]
 
 
 @app.get("/")

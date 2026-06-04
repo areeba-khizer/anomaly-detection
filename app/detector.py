@@ -99,16 +99,14 @@ class AnomalyDetector:
         self._score_max = float(raw.max())
         self._fitted = True
 
-        # Auto-calibrate the decision threshold: replay the baseline through
-        # the live scoring path and take a high quantile of the resulting
-        # anomaly scores, so we flag only the most unusual points.
+        # Auto-calibrate the decision threshold from the baseline score
+        # distribution and take a high quantile, so we flag only the most
+        # unusual points. The features in ``matrix`` are exactly those the live
+        # scoring path produces, so this is vectorised but equivalent.
         if self._auto_threshold:
-            self._buffer.clear()
-            scores = []
-            for v in values:
-                scores.append(self.score(v, update=True).anomaly_score)
+            baseline_scores = self._normalise_array(raw)
             self.threshold = float(
-                np.quantile(scores, self.calibration_quantile)
+                np.quantile(baseline_scores, self.calibration_quantile)
             )
 
         # Re-seed the live buffer with the tail of the baseline.
@@ -126,6 +124,37 @@ class AnomalyDetector:
         span = self._score_max - self._score_min or 1e-6
         normal = (raw_score - self._score_min) / span
         return float(np.clip(1.0 - normal, 0.0, 1.0))
+
+    def _normalise_array(self, raw: np.ndarray) -> np.ndarray:
+        """Vectorised version of :meth:`_normalise` for a batch of scores."""
+        span = self._score_max - self._score_min or 1e-6
+        return np.clip(1.0 - (raw - self._score_min) / span, 0.0, 1.0)
+
+    def score_series(self, values: list[float]) -> list[Scored]:
+        """Score a whole series at once (no streaming state mutation).
+
+        Builds the rolling-window features for every point and scores them in a
+        single vectorised pass — far faster than calling :meth:`score` in a
+        loop, and equivalent to streaming the values through in order.
+        """
+        if not self._fitted:
+            raise RuntimeError("detector is not fitted; call fit() first")
+
+        saved_buffer = list(self._buffer)
+        matrix = self._feature_matrix(values)
+        raw = self.model.decision_function(matrix)
+        scores = self._normalise_array(raw)
+        self._buffer = deque(saved_buffer, maxlen=self.window)
+
+        return [
+            Scored(
+                value=float(v),
+                anomaly_score=round(float(s), 4),
+                is_anomaly=bool(s >= self.threshold),
+                threshold=self.threshold,
+            )
+            for v, s in zip(values, scores)
+        ]
 
     def score(self, value: float, update: bool = True) -> Scored:
         """Score a single observation and (optionally) update the buffer."""

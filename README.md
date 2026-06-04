@@ -148,6 +148,7 @@ curl -X POST http://127.0.0.1:8000/score \
 |----------|--------|-------------|
 | `/score` | POST | Score a submitted data point |
 | `/stream/next` | GET | Generate + score the next simulated point |
+| `/dataset/replay` | GET | Real NYC taxi series scored + evaluated vs known anomalies |
 | `/history` | GET | Recent scored points (powers the dashboard) |
 | `/health` | GET | Service / model status |
 | `/reset` | POST | Clear history and restart the demo stream |
@@ -204,13 +205,20 @@ Known anomalies (NAB ground truth):
   [DETECTED] Jan 2015 snowstorm   2015-01-24 – 2015-01-29
 
 Detected 4/5 known anomalies.
-Total points flagged: 87 (0.8% of stream); 4 outside known windows.
+Total points flagged: 104 (1.0% of stream); 21 outside known windows.
 ```
 
-It catches **4 of the 5** known events with a 0.8% overall flag rate. The
+It catches **4 of the 5** known events with a 1.0% overall flag rate. The
 missed one (Thanksgiving) has a milder dip than the sharp Christmas/New
 Year/snowstorm drops — a fair illustration of where an unsupervised,
 univariate Isolation Forest trades recall for a very low false-positive rate.
+
+The same view is available **on the dashboard**: switch the source dropdown to
+*NYC taxi (real data)* (or open [`/?mode=taxi`](http://127.0.0.1:8000/?mode=taxi))
+to see the whole real series with detected anomalies (red), the known-anomaly
+windows (orange), and a ground-truth results table.
+
+![NYC taxi replay](docs/dashboard_nyc_taxi.png)
 
 ---
 

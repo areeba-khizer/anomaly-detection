@@ -32,7 +32,7 @@ def score_in_process(values: list[float]) -> list[bool]:
     detector = AnomalyDetector(
         window=WINDOW, calibration_quantile=CALIBRATION_QUANTILE
     ).fit(values)
-    return [detector.score(v).is_anomaly for v in values]
+    return [r.is_anomaly for r in detector.score_series(values)]
 
 
 def score_via_api(values: list[float], api: str) -> list[bool]:
